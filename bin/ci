@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "==> gofmt"
+GOFMT_OUT=$(gofmt -l .)
+if [ -n "$GOFMT_OUT" ]; then
+  echo "gofmt found unformatted files:"
+  echo "$GOFMT_OUT"
+  exit 1
+fi
+
+echo "==> go vet"
+go vet ./...
+
+echo "==> golangci-lint"
+golangci-lint run
+
+echo "==> go test"
+go test ./... -race -coverprofile=coverage.out -covermode=atomic
+
+echo "==> go build"
+go build ./...
+
+echo "==> all checks passed"
