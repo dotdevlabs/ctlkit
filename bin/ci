@@ -18,6 +18,11 @@ golangci-lint run
 echo "==> go test"
 go test ./... -race -coverprofile=coverage.out -covermode=atomic
 
+echo "==> coverage gate"
+COVERAGE=$(go tool cover -func=coverage.out | grep "^total:" | awk '{print $3}' | tr -d '%')
+echo "    total coverage: ${COVERAGE}%"
+awk -v cov="$COVERAGE" 'BEGIN { if (cov+0 < 70) { printf "FAIL: coverage %.1f%% < 70%% threshold\n", cov+0; exit 1 } }'
+
 echo "==> go build"
 go build ./...
 
