@@ -10,7 +10,7 @@ Import ctlkit to get: a Cobra root command with global flags, named contexts bac
 |---------|---------|
 | `pkg/clierror` | Structured `CLIError{code, message, hint}` type; per-class exit codes; directive stderr rendering |
 | `pkg/config` | Named contexts in `~/.config/atmt/<product>.yaml`; Viper-backed load/save; env var overrides; `auth` and `context` Cobra commands |
-| `pkg/httpclient` | Bearer auth; automatic browser `User-Agent`; exponential-backoff retry; `{data, pagination}` JSON envelope decoding |
+| `pkg/httpclient` | Bearer auth; automatic browser `User-Agent`; exponential-backoff retry; flat `{data, pagination}` JSON envelope decoding; JSON:API (`application/vnd.api+json`) single/collection resource decoding with typed attributes |
 | `pkg/output` | Three modes: human-readable table (default), `--json` envelope, `--format '{{…}}'` Go-template projection |
 | `pkg/ctxutil` | Type-safe `context.Context` helpers for propagating config, HTTP client, renderer, and global flags through Cobra's `RunE` chain |
 | `pkg/root` | Single entry point — `root.New(BuildConfig)` returns a fully-wired `*cobra.Command` with all global flags and built-in subcommands |
@@ -82,11 +82,39 @@ import "github.com/dotdevlabs/ctlkit/pkg/httpclient"
 
 client := httpclient.New(baseURL, token)
 
-// Generic envelope helper — decodes {data: T, pagination: ...}
+// Flat-envelope helper — decodes {data: T, pagination: ...}
 env, err := httpclient.GetEnvelope[[]MyResource](ctx, client, "/v1/resources")
 ```
 
 Every request automatically sets a real browser `User-Agent` (Chrome/Mac) to pass through Cloudflare bot management. Retries with exponential backoff on 429/5xx responses (up to 3 attempts).
+
+### JSON:API Support
+
+For backends that serve `application/vnd.api+json`, ctlkit provides a typed JSON:API decoder. Resource `id` (string) and `type` are promoted alongside the flattened `attributes` struct — no extra nesting in call sites.
+
+```go
+// Define your attributes struct — only the fields under "attributes" in the JSON:API document.
+type ProjectAttrs struct {
+    Name     string `json:"name"`
+    Platform string `json:"platform"`
+    Repo     string `json:"repo"`
+}
+
+// Single resource: GET /api/projects/42
+res, err := httpclient.GetJSONAPISingle[ProjectAttrs](ctx, client, "/api/projects/42")
+// res.ID, res.Type, res.Attributes.Name, res.Attributes.Platform, ...
+
+// Collection: GET /api/projects
+col, err := httpclient.GetJSONAPICollection[ProjectAttrs](ctx, client, "/api/projects")
+// col.Data []Resource[ProjectAttrs], col.Links.Next, col.Meta["total"]
+
+// Create: POST /api/projects
+res, err := httpclient.PostJSONAPISingle[ProjectAttrs](ctx, client, "/api/projects", body)
+```
+
+Requests automatically carry `Accept: application/vnd.api+json`; POST bodies use `Content-Type: application/vnd.api+json`. Non-2xx responses parse the JSON:API `errors[]` array and surface the first `detail` (or `title`) in the returned `CLIError`.
+
+The flat-envelope helpers (`GetEnvelope`, `PostEnvelope`) are unchanged and remain the right choice for backends on the older `{data: {...}}` envelope.
 
 ## Output Modes
 
