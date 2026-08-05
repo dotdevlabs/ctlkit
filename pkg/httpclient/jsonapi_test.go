@@ -251,3 +251,61 @@ func TestJSONAPIErrorNoDetail(t *testing.T) {
 		t.Errorf("Message = %q, want to contain %q", ce.Message, "Resource Not Found")
 	}
 }
+
+func TestBaseClientAcceptHeader(t *testing.T) {
+	var gotAccept string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAccept = r.Header.Get("Accept")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	c := httpclient.New(srv.URL, "tok")
+	var out any
+	if err := c.Get(context.Background(), "/items", &out); err != nil {
+		t.Fatal(err)
+	}
+	if gotAccept != "application/json" {
+		t.Errorf("Accept = %q, want %q", gotAccept, "application/json")
+	}
+}
+
+func TestJSONAPICollectionAcceptHeader(t *testing.T) {
+	var gotAccept string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAccept = r.Header.Get("Accept")
+		w.Header().Set("Content-Type", "application/vnd.api+json")
+		_, _ = w.Write([]byte(`{"data": [], "links": {}}`))
+	}))
+	defer srv.Close()
+
+	c := httpclient.New(srv.URL, "tok")
+	_, err := httpclient.GetJSONAPICollection[projectAttrs](context.Background(), c, "/projects")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotAccept != "application/vnd.api+json" {
+		t.Errorf("Accept = %q, want %q", gotAccept, "application/vnd.api+json")
+	}
+}
+
+func TestPostJSONAPISingleAcceptHeader(t *testing.T) {
+	var gotAccept string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAccept = r.Header.Get("Accept")
+		w.Header().Set("Content-Type", "application/vnd.api+json")
+		_, _ = w.Write([]byte(`{"data": {"type": "projects", "id": "1", "attributes": {}}}`))
+	}))
+	defer srv.Close()
+
+	c := httpclient.New(srv.URL, "tok")
+	_, err := httpclient.PostJSONAPISingle[projectAttrs](context.Background(), c, "/projects",
+		map[string]any{"data": map[string]any{"type": "projects"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotAccept != "application/vnd.api+json" {
+		t.Errorf("Accept = %q, want %q", gotAccept, "application/vnd.api+json")
+	}
+}
