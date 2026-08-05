@@ -76,14 +76,11 @@ func statusToCode(status int) clierror.ErrorCode {
 	}
 }
 
-// do executes the request with retry logic, sets browser UA and bearer auth on every attempt.
-func (c *Client) do(ctx context.Context, method, path string, body []byte, out any) error {
+// execRaw is the single execution choke-point for all HTTP requests.
+// It runs the retry loop with the caller-specified accept and contentType media types,
+// returning raw response bytes on 2xx. Callers must not override headers after this call.
+func (c *Client) execRaw(ctx context.Context, method, path string, body []byte, accept, contentType string) ([]byte, error) {
 	url := c.baseURL + path
-
-	var bodyBytes []byte
-	if body != nil {
-		bodyBytes = body
-	}
 
 	var lastStatus int
 	for attempt := 0; attempt < maxRetries; attempt++ {
@@ -91,55 +88,50 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte, out a
 			delay := time.Duration(500*(1<<(attempt-1))) * time.Millisecond
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return nil, ctx.Err()
 			case <-time.After(delay):
 			}
 		}
 
 		var bodyReader io.Reader
-		if bodyBytes != nil {
-			bodyReader = bytes.NewReader(bodyBytes)
+		if body != nil {
+			bodyReader = bytes.NewReader(body)
 		}
 
 		req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
 		if err != nil {
-			return fmt.Errorf("building request: %w", err)
+			return nil, fmt.Errorf("building request: %w", err)
 		}
 
 		req.Header.Set("User-Agent", BrowserUserAgent)
 		req.Header.Set("Authorization", "Bearer "+c.token)
-		req.Header.Set("Accept", "application/json")
-		if bodyBytes != nil {
-			req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", accept)
+		if body != nil && contentType != "" {
+			req.Header.Set("Content-Type", contentType)
 		}
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			if ctx.Err() != nil {
-				return ctx.Err()
+				return nil, ctx.Err()
 			}
 			if attempt < maxRetries-1 {
 				continue
 			}
-			return fmt.Errorf("request failed: %w", err)
+			return nil, fmt.Errorf("request failed: %w", err)
 		}
 
 		lastStatus = resp.StatusCode
 		respBody, readErr := io.ReadAll(resp.Body)
 		if closeErr := resp.Body.Close(); closeErr != nil {
-			return fmt.Errorf("closing response body: %w", closeErr)
+			return nil, fmt.Errorf("closing response body: %w", closeErr)
 		}
 		if readErr != nil {
-			return fmt.Errorf("reading response: %w", readErr)
+			return nil, fmt.Errorf("reading response: %w", readErr)
 		}
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			if out != nil && len(respBody) > 0 {
-				if err := json.Unmarshal(respBody, out); err != nil {
-					return fmt.Errorf("decoding response: %w", err)
-				}
-			}
-			return nil
+			return respBody, nil
 		}
 
 		if isRetryable(resp.StatusCode) && attempt < maxRetries-1 {
@@ -148,7 +140,7 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte, out a
 				if d, parseErr := time.ParseDuration(ra + "s"); parseErr == nil {
 					select {
 					case <-ctx.Done():
-						return ctx.Err()
+						return nil, ctx.Err()
 					case <-time.After(d):
 					}
 				}
@@ -157,26 +149,60 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte, out a
 		}
 
 		// Non-retryable or retries exhausted — build a CLIError.
+		// Try JSON:API errors[] format first, then flat message/error fields.
 		code := statusToCode(resp.StatusCode)
 		msg := fmt.Sprintf("HTTP %d", resp.StatusCode)
-		// Try to extract message from JSON error body.
-		var errBody struct {
-			Message string `json:"message"`
-			Error   string `json:"error"`
-		}
 		if len(respBody) > 0 {
-			if jsonErr := json.Unmarshal(respBody, &errBody); jsonErr == nil {
-				if errBody.Message != "" {
-					msg = errBody.Message
-				} else if errBody.Error != "" {
-					msg = errBody.Error
+			var errDoc struct {
+				Errors []struct {
+					Title  string `json:"title"`
+					Detail string `json:"detail"`
+				} `json:"errors"`
+			}
+			if jsonErr := json.Unmarshal(respBody, &errDoc); jsonErr == nil && len(errDoc.Errors) > 0 {
+				parts := make([]string, 0, len(errDoc.Errors))
+				for _, e := range errDoc.Errors {
+					if e.Detail != "" {
+						parts = append(parts, e.Detail)
+					} else if e.Title != "" {
+						parts = append(parts, e.Title)
+					}
+				}
+				if len(parts) > 0 {
+					msg = strings.Join(parts, "; ")
+				}
+			} else {
+				var errBody struct {
+					Message string `json:"message"`
+					Error   string `json:"error"`
+				}
+				if jsonErr := json.Unmarshal(respBody, &errBody); jsonErr == nil {
+					if errBody.Message != "" {
+						msg = errBody.Message
+					} else if errBody.Error != "" {
+						msg = errBody.Error
+					}
 				}
 			}
 		}
-		return clierror.New(code, msg, "")
+		return nil, clierror.New(code, msg, "")
 	}
 
-	return clierror.New(statusToCode(lastStatus), fmt.Sprintf("HTTP %d after %d retries", lastStatus, maxRetries), "")
+	return nil, clierror.New(statusToCode(lastStatus), fmt.Sprintf("HTTP %d after %d retries", lastStatus, maxRetries), "")
+}
+
+// do executes the request with retry logic and application/json content negotiation.
+func (c *Client) do(ctx context.Context, method, path string, body []byte, out any) error {
+	raw, err := c.execRaw(ctx, method, path, body, "application/json", "application/json")
+	if err != nil {
+		return err
+	}
+	if out != nil && len(raw) > 0 {
+		if err := json.Unmarshal(raw, out); err != nil {
+			return fmt.Errorf("decoding response: %w", err)
+		}
+	}
+	return nil
 }
 
 func marshalBody(body any) ([]byte, error) {
