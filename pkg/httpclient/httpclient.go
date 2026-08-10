@@ -76,12 +76,10 @@ func statusToCode(status int) clierror.ErrorCode {
 	}
 }
 
-// execRaw is the single execution choke-point for all HTTP requests.
-// It runs the retry loop with the caller-specified accept and contentType media types,
-// returning raw response bytes on 2xx. Callers must not override headers after this call.
-func (c *Client) execRaw(ctx context.Context, method, path string, body []byte, accept, contentType string) ([]byte, error) {
-	url := c.baseURL + path
-
+// execRawURL is the core HTTP execution choke-point.
+// Accepts a fully-qualified URL; the retry loop handles transient failures.
+// Callers must not override headers after this call.
+func (c *Client) execRawURL(ctx context.Context, method, url string, body []byte, accept, contentType string) ([]byte, error) {
 	var lastStatus int
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
@@ -189,6 +187,12 @@ func (c *Client) execRaw(ctx context.Context, method, path string, body []byte, 
 	}
 
 	return nil, clierror.New(statusToCode(lastStatus), fmt.Sprintf("HTTP %d after %d retries", lastStatus, maxRetries), "")
+}
+
+// execRaw wraps execRawURL, prepending c.baseURL to path.
+// Existing callers (do, doJSONAPIRaw) are unaffected.
+func (c *Client) execRaw(ctx context.Context, method, path string, body []byte, accept, contentType string) ([]byte, error) {
+	return c.execRawURL(ctx, method, c.baseURL+path, body, accept, contentType)
 }
 
 // do executes the request with retry logic and application/json content negotiation.
