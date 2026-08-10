@@ -309,3 +309,194 @@ func TestPostJSONAPISingleAcceptHeader(t *testing.T) {
 		t.Errorf("Accept = %q, want %q", gotAccept, "application/vnd.api+json")
 	}
 }
+
+func TestJSONAPISingleSelfLink(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.api+json")
+		_, _ = w.Write([]byte(`{
+			"data": {
+				"type": "projects",
+				"id": "42",
+				"attributes": {"name": "acme", "platform": "k8s"},
+				"links": {"self": "/projects/42"}
+			}
+		}`))
+	}))
+	defer srv.Close()
+
+	c := httpclient.New(srv.URL, "tok")
+	res, err := httpclient.GetJSONAPISingle[projectAttrs](context.Background(), c, "/projects/42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.SelfLink != "/projects/42" {
+		t.Errorf("SelfLink = %q, want %q", res.SelfLink, "/projects/42")
+	}
+}
+
+func TestJSONAPICollectionTopLevelSelf(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.api+json")
+		_, _ = w.Write([]byte(`{
+			"data": [],
+			"links": {
+				"self": "/projects",
+				"first": "/projects?page=1",
+				"last":  "/projects?page=1"
+			}
+		}`))
+	}))
+	defer srv.Close()
+
+	c := httpclient.New(srv.URL, "tok")
+	col, err := httpclient.GetJSONAPICollection[projectAttrs](context.Background(), c, "/projects")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if col.Links.Self != "/projects" {
+		t.Errorf("Links.Self = %q, want %q", col.Links.Self, "/projects")
+	}
+}
+
+func TestJSONAPIPageMeta(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.api+json")
+		_, _ = w.Write([]byte(`{
+			"data": [],
+			"links": {},
+			"meta": {"total": 50, "per_page": 10, "page": 3}
+		}`))
+	}))
+	defer srv.Close()
+
+	c := httpclient.New(srv.URL, "tok")
+	col, err := httpclient.GetJSONAPICollection[projectAttrs](context.Background(), c, "/projects")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if col.PageMeta.Total != 50 {
+		t.Errorf("PageMeta.Total = %d, want 50", col.PageMeta.Total)
+	}
+	if col.PageMeta.PerPage != 10 {
+		t.Errorf("PageMeta.PerPage = %d, want 10", col.PageMeta.PerPage)
+	}
+	if col.PageMeta.Page != 3 {
+		t.Errorf("PageMeta.Page = %d, want 3", col.PageMeta.Page)
+	}
+	// backward-compat: raw map still works
+	total, ok := col.Meta["total"].(float64)
+	if !ok {
+		t.Fatalf("meta[total] type = %T, want float64", col.Meta["total"])
+	}
+	if total != 50 {
+		t.Errorf("meta[total] = %v, want 50", total)
+	}
+}
+
+func TestJSONAPIBoundaryLinksFirstPage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.api+json")
+		_, _ = w.Write([]byte(`{
+			"data": [],
+			"links": {
+				"self":  "/projects?page=1",
+				"first": "/projects?page=1",
+				"prev":  null,
+				"next":  "/projects?page=2",
+				"last":  "/projects?page=5"
+			}
+		}`))
+	}))
+	defer srv.Close()
+
+	c := httpclient.New(srv.URL, "tok")
+	col, err := httpclient.GetJSONAPICollection[projectAttrs](context.Background(), c, "/projects?page=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if col.Links.Prev != "" {
+		t.Errorf("Links.Prev = %q on first page, want empty string", col.Links.Prev)
+	}
+	if col.Links.Next != "/projects?page=2" {
+		t.Errorf("Links.Next = %q, want %q", col.Links.Next, "/projects?page=2")
+	}
+}
+
+func TestJSONAPIBoundaryLinksLastPage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.api+json")
+		_, _ = w.Write([]byte(`{
+			"data": [],
+			"links": {
+				"self":  "/projects?page=5",
+				"first": "/projects?page=1",
+				"prev":  "/projects?page=4",
+				"next":  null,
+				"last":  "/projects?page=5"
+			}
+		}`))
+	}))
+	defer srv.Close()
+
+	c := httpclient.New(srv.URL, "tok")
+	col, err := httpclient.GetJSONAPICollection[projectAttrs](context.Background(), c, "/projects?page=5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if col.Links.Next != "" {
+		t.Errorf("Links.Next = %q on last page, want empty string", col.Links.Next)
+	}
+	if col.Links.Prev != "/projects?page=4" {
+		t.Errorf("Links.Prev = %q, want %q", col.Links.Prev, "/projects?page=4")
+	}
+}
+
+func TestCollectAllJSONAPI(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.api+json")
+		page := r.URL.Query().Get("page")
+		switch page {
+		case "", "1":
+			_, _ = w.Write([]byte(`{
+				"data": [
+					{"type":"items","id":"1","attributes":{"name":"one","platform":""}},
+					{"type":"items","id":"2","attributes":{"name":"two","platform":""}}
+				],
+				"links": {"next": "/items?page=2"}
+			}`))
+		case "2":
+			_, _ = w.Write([]byte(`{
+				"data": [
+					{"type":"items","id":"3","attributes":{"name":"three","platform":""}},
+					{"type":"items","id":"4","attributes":{"name":"four","platform":""}}
+				],
+				"links": {"next": "/items?page=3"}
+			}`))
+		case "3":
+			_, _ = w.Write([]byte(`{
+				"data": [
+					{"type":"items","id":"5","attributes":{"name":"five","platform":""}}
+				],
+				"links": {}
+			}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	c := httpclient.New(srv.URL, "tok")
+	items, err := httpclient.CollectAllJSONAPI[projectAttrs](context.Background(), c, "/items")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 5 {
+		t.Fatalf("len(items) = %d, want 5", len(items))
+	}
+	wantIDs := []string{"1", "2", "3", "4", "5"}
+	for i, id := range wantIDs {
+		if items[i].ID != id {
+			t.Errorf("items[%d].ID = %q, want %q", i, items[i].ID, id)
+		}
+	}
+}
