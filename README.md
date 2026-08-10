@@ -102,17 +102,28 @@ type ProjectAttrs struct {
 
 // Single resource: GET /api/projects/42
 res, err := httpclient.GetJSONAPISingle[ProjectAttrs](ctx, client, "/api/projects/42")
-// res.ID, res.Type, res.Attributes.Name, res.Attributes.Platform, ...
+// res.ID, res.Type, res.Attributes.Name, res.SelfLink (from links.self)
 
 // Collection: GET /api/projects
 col, err := httpclient.GetJSONAPICollection[ProjectAttrs](ctx, client, "/api/projects")
-// col.Data []Resource[ProjectAttrs], col.Links.Next, col.Meta["total"]
+// col.Data []Resource[ProjectAttrs] — each item has .SelfLink
+// col.Links.Self, col.Links.First, col.Links.Prev, col.Links.Next, col.Links.Last
+// col.PageMeta.Total, col.PageMeta.PerPage, col.PageMeta.Page (typed; zero if absent)
+// col.Meta["total"].(float64) — raw map still available for all meta keys
+
+// Fetch all pages by following links.next automatically:
+all, err := httpclient.CollectAllJSONAPI[ProjectAttrs](ctx, client, "/api/projects")
+// all is []Resource[ProjectAttrs] with items from every page concatenated in order
 
 // Create: POST /api/projects
 res, err := httpclient.PostJSONAPISingle[ProjectAttrs](ctx, client, "/api/projects", body)
 ```
 
 Requests automatically carry `Accept: application/vnd.api+json`; POST bodies use `Content-Type: application/vnd.api+json`. Non-2xx responses parse the JSON:API `errors[]` array and surface the first `detail` (or `title`) in the returned `CLIError`.
+
+**Resource self-links**: `res.SelfLink` is populated from the resource-level `links.self` returned by the server. Use it to build follow-up requests to the canonical URL without constructing it manually.
+
+**Pagination link-following**: `CollectAllJSONAPI` fetches the first page at `path` and then follows `links.next` until it is absent, returning all resources in order. Both absolute (`https://...`) and relative (`/path?page=2`) `next` links are handled. Pagination with `GetJSONAPICollection` plus `col.Links.Next` still works for callers that want per-page control.
 
 The flat-envelope helpers (`GetEnvelope`, `PostEnvelope`) are unchanged and remain the right choice for backends on the older `{data: {...}}` envelope.
 
