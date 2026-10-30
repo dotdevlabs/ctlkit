@@ -190,6 +190,32 @@ loopctl ai --json   # machine-stable JSON for agent ingestion
 
 Pass `Workflows []airef.Workflow` in `BuildConfig` to include hand-authored "common workflows" in the output.
 
+The `ai` command registered by `pkg/root` is the single machine-readable command reference for every ctlkit CLI; a CLI should not write its own `ai`. `--json` is read from the root persistent flag at run time (`ai --json` and `--json ai` both work).
+
+JSON shape (`airef.Reference`):
+
+```json
+{
+  "product": "loopctl",
+  "version": "v1.0.0",
+  "commands": [
+    {
+      "use": "tasks",
+      "short": "Manage tasks",
+      "long": "...",
+      "flags": [{"name": "project-id", "type": "string", "default": "", "usage": "Project ID", "required": true}],
+      "subcommands": [],
+      "examples": "...",
+      "annotations": {"operation_id": "listTasks", "method": "GET", "path": "/tasks"}
+    }
+  ],
+  "workflows": [{"name": "...", "description": "...", "steps": ["..."]}]
+}
+```
+
+- `annotations` is copied verbatim from the command's cobra `Annotations` (omitted when empty), so a CLI can attach metadata such as an API operation id, method and path.
+- Hidden commands (at any depth) and the `help` and `completion` commands are left out.
+
 ## Version Command
 
 ```bash

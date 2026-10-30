@@ -37,6 +37,9 @@ type CommandRef struct {
 	Flags       []FlagRef    `json:"flags,omitempty"`
 	Subcommands []CommandRef `json:"subcommands,omitempty"`
 	Examples    string       `json:"examples,omitempty"`
+	// Annotations carries the command's cobra annotations verbatim, so a CLI can
+	// attach metadata (e.g. API operation id, method, path).
+	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
 // Reference is the top-level AI reference document.
@@ -55,9 +58,18 @@ func Build(root *cobra.Command, product, ver string, workflows []Workflow) Refer
 		Workflows: workflows,
 	}
 	for _, sub := range root.Commands() {
+		if skipCommand(sub) {
+			continue
+		}
 		ref.Commands = append(ref.Commands, buildCommandRef(sub))
 	}
 	return ref
+}
+
+// skipCommand reports whether cmd is left out of the reference: hidden
+// commands and cobra's built-in help and completion commands.
+func skipCommand(cmd *cobra.Command) bool {
+	return cmd.Hidden || cmd.Name() == "help" || cmd.Name() == "completion"
 }
 
 func buildCommandRef(cmd *cobra.Command) CommandRef {
@@ -68,7 +80,13 @@ func buildCommandRef(cmd *cobra.Command) CommandRef {
 		Examples: cmd.Example,
 		Flags:    extractFlags(cmd),
 	}
+	if len(cmd.Annotations) > 0 {
+		ref.Annotations = cmd.Annotations
+	}
 	for _, sub := range cmd.Commands() {
+		if skipCommand(sub) {
+			continue
+		}
 		ref.Subcommands = append(ref.Subcommands, buildCommandRef(sub))
 	}
 	return ref
@@ -90,20 +108,30 @@ func extractFlags(cmd *cobra.Command) []FlagRef {
 	return refs
 }
 
-// NewCommand returns the "ai" cobra.Command that renders the reference.
-func NewCommand(product, ver string, workflows []Workflow, r *output.Renderer) *cobra.Command {
+// NewCommand returns the "ai" cobra.Command that renders the reference. It
+// prints JSON when the root command's --json persistent flag is set (read at
+// run time), and markdown otherwise.
+func NewCommand(product, ver string, workflows []Workflow) *cobra.Command {
 	return &cobra.Command{
 		Use:   "ai",
 		Short: "Print AI-ingestible command reference",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			root := cmd.Root()
-			ref := Build(root, product, ver, workflows)
-			if r != nil && r.Mode == output.ModeJSON {
+			ref := Build(cmd.Root(), product, ver, workflows)
+			if jsonRequested(cmd) {
 				return output.JSONTo(cmd.OutOrStdout(), ref)
 			}
 			return renderMarkdown(cmd.OutOrStdout(), ref)
 		},
 	}
+}
+
+// jsonRequested reports whether the --json flag is set on cmd or its root.
+func jsonRequested(cmd *cobra.Command) bool {
+	f := cmd.Flags().Lookup("json")
+	if f == nil {
+		f = cmd.Root().PersistentFlags().Lookup("json")
+	}
+	return f != nil && f.Value.String() == "true"
 }
 
 // mw is a helper to write to w and capture the first error.
