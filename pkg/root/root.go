@@ -86,7 +86,7 @@ func New(cfg BuildConfig) *cobra.Command {
 	root.AddCommand(config.AuthCommand(cfg.Product))
 	root.AddCommand(config.ContextCommand(cfg.Product))
 	root.AddCommand(version.NewCommand(cfg.Product, nil))
-	root.AddCommand(airef.NewCommand(cfg.Product, cfg.Version.Version, cfg.Workflows, nil))
+	root.AddCommand(airef.NewCommand(cfg.Product, cfg.Version.Version, cfg.Workflows))
 
 	// Product-specific resource commands.
 	for _, cmd := range cfg.Commands {

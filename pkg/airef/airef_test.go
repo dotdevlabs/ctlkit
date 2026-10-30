@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dotdevlabs/ctlkit/pkg/airef"
-	"github.com/dotdevlabs/ctlkit/pkg/output"
 )
 
 func makeTestRoot() *cobra.Command {
@@ -90,12 +89,13 @@ func TestBuildFlagIntrospection(t *testing.T) {
 func TestNewCommandJSON(t *testing.T) {
 	root := makeTestRoot()
 	var out, errOut bytes.Buffer
-	r := output.New(true, "", &out, &errOut)
-	aiCmd := airef.NewCommand("testctl", "v1.0.0", nil, r)
+	_ = errOut
+	root.PersistentFlags().Bool("json", false, "json")
+	aiCmd := airef.NewCommand("testctl", "v1.0.0", nil)
 	aiCmd.SetOut(&out)
 	root.AddCommand(aiCmd)
 
-	root.SetArgs([]string{"ai"})
+	root.SetArgs([]string{"ai", "--json"})
 	if err := root.Execute(); err != nil {
 		t.Fatal(err)
 	}
@@ -112,10 +112,11 @@ func TestNewCommandJSON(t *testing.T) {
 func TestNewCommandMarkdown(t *testing.T) {
 	root := makeTestRoot()
 	var out, errOut bytes.Buffer
-	r := output.New(false, "", &out, &errOut)
+	_ = errOut
+	root.PersistentFlags().Bool("json", false, "json")
 	aiCmd := airef.NewCommand("testctl", "v1.0.0", []airef.Workflow{
 		{Name: "List tasks", Description: "How to list tasks", Steps: []string{"Run tasks command"}},
-	}, r)
+	})
 	aiCmd.SetOut(&out)
 	root.AddCommand(aiCmd)
 
@@ -147,5 +148,69 @@ func TestWorkflowsInReference(t *testing.T) {
 	}
 	if ref.Workflows[0].Name != "Create task" {
 		t.Errorf("workflow name = %q", ref.Workflows[0].Name)
+	}
+}
+
+func TestAnnotations(t *testing.T) {
+	root := makeTestRoot()
+	root.Commands()[0].Annotations = map[string]string{"operation_id": "listTasks", "method": "GET"}
+	root.AddCommand(&cobra.Command{Use: "plain", Short: "no annotations"})
+	ref := airef.Build(root, "testctl", "v1", nil)
+	for _, c := range ref.Commands {
+		switch c.Use {
+		case "tasks":
+			if c.Annotations["operation_id"] != "listTasks" || c.Annotations["method"] != "GET" {
+				t.Errorf("annotations = %v", c.Annotations)
+			}
+		case "plain":
+			if c.Annotations != nil {
+				t.Errorf("annotations = %v, want nil", c.Annotations)
+			}
+		}
+	}
+	b, _ := json.Marshal(ref)
+	if !strings.Contains(string(b), `"annotations":{"method":"GET","operation_id":"listTasks"}`) {
+		t.Errorf("json missing annotations: %s", b)
+	}
+	if strings.Count(string(b), `"annotations"`) != 1 {
+		t.Errorf("annotations should be omitted when empty: %s", b)
+	}
+}
+
+func TestHiddenHelpCompletionExcluded(t *testing.T) {
+	root := makeTestRoot()
+	root.AddCommand(&cobra.Command{Use: "secret", Hidden: true})
+	root.AddCommand(&cobra.Command{Use: "help"})
+	root.AddCommand(&cobra.Command{Use: "completion"})
+	parent := &cobra.Command{Use: "parent"}
+	parent.AddCommand(&cobra.Command{Use: "shown"}, &cobra.Command{Use: "nested-hidden", Hidden: true})
+	root.AddCommand(parent)
+	ref := airef.Build(root, "testctl", "v1", nil)
+	var uses []string
+	for _, c := range ref.Commands {
+		uses = append(uses, c.Use)
+		if c.Use == "parent" {
+			if len(c.Subcommands) != 1 || c.Subcommands[0].Use != "shown" {
+				t.Errorf("subcommands = %+v", c.Subcommands)
+			}
+		}
+	}
+	if got := strings.Join(uses, ","); got != "tasks,parent" && got != "parent,tasks" {
+		t.Errorf("commands = %s", got)
+	}
+}
+
+func TestNewCommandWithoutJSONFlagIsMarkdown(t *testing.T) {
+	root := makeTestRoot()
+	var out bytes.Buffer
+	aiCmd := airef.NewCommand("testctl", "v1.0.0", nil)
+	aiCmd.SetOut(&out)
+	root.AddCommand(aiCmd)
+	root.SetArgs([]string{"ai"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "testctl Command Reference") {
+		t.Errorf("expected markdown, got %q", out.String())
 	}
 }
