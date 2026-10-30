@@ -214,6 +214,20 @@ JSON shape (`airef.Reference`):
 ```
 
 - `annotations` is copied verbatim from the command's cobra `Annotations` (omitted when empty), so a CLI can attach metadata such as an API operation id, method and path.
+- Each `flags[]` entry has `name`, `type`, `default`, `usage`, `required`, plus optional fields omitted when empty:
+  - `enum`: the flag's allowed values.
+  - `annotations`: the flag's other pflag annotations (multiple values joined with `,`). The required marker is surfaced as `required` and is not repeated here.
+  - `schema`: the JSON Schema of the value, for flags holding JSON.
+- Declare them with the helpers in `pkg/airef`, which store pflag annotations under the exported keys `airef.EnumAnnotation` (`ctlkit.enum`) and `airef.SchemaAnnotation` (`ctlkit.schema`):
+
+  ```go
+  cmd.Flags().String("status", "", "Task status")
+  if err := airef.SetFlagEnum(cmd, "status", []string{"open", "done"}); err != nil { /* ... */ }
+  cmd.Flags().String("filter", "", "Filter as JSON")
+  if err := airef.SetFlagSchema(cmd, "filter", `{"type":"object"}`); err != nil { /* ... */ }
+  ```
+
+  `SetFlagEnum` rejects an unknown flag, an empty list, empty values and duplicates. `SetFlagSchema` rejects an unknown flag and anything that is not valid JSON or not a JSON object/boolean. The markdown reference appends `Allowed: ...` to the usage of enum flags.
 - Hidden commands (at any depth) and the `help` and `completion` commands are left out.
 
 ## Version Command
