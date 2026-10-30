@@ -104,3 +104,63 @@ func TestAIMarkdown(t *testing.T) {
 		t.Error("hidden command rendered")
 	}
 }
+
+func TestAIJSONFlagEnumAnnotationsSchema(t *testing.T) {
+	tasks := &cobra.Command{Use: "tasks", Short: "Manage tasks"}
+	tasks.Flags().String("status", "", "Task status")
+	tasks.Flags().String("filter", "", "Filter JSON")
+	tasks.Flags().String("plain", "", "Plain")
+	if err := airef.SetFlagEnum(tasks, "status", []string{"open", "done"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := airef.SetFlagSchema(tasks, "filter", `{"type":"object","properties":{"id":{"type":"integer"}}}`); err != nil {
+		t.Fatal(err)
+	}
+	_ = tasks.Flags().SetAnnotation("status", "api.field", []string{"status"})
+	r := makeRoot(tasks)
+	var out bytes.Buffer
+	r.SetOut(&out)
+	r.SetErr(&bytes.Buffer{})
+	r.SetArgs([]string{"ai", "--json"})
+	if err := r.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var raw struct {
+		Commands []struct {
+			Use   string                       `json:"use"`
+			Flags []map[string]json.RawMessage `json:"flags"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &raw); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, out.String())
+	}
+	for _, c := range raw.Commands {
+		if c.Use != "tasks" {
+			continue
+		}
+		got := map[string]map[string]json.RawMessage{}
+		for _, f := range c.Flags {
+			var n string
+			_ = json.Unmarshal(f["name"], &n)
+			got[n] = f
+		}
+		compact := func(m json.RawMessage) string {
+			var b bytes.Buffer
+			_ = json.Compact(&b, m)
+			return b.String()
+		}
+		if compact(got["status"]["enum"]) != `["open","done"]` || compact(got["status"]["annotations"]) != `{"api.field":"status"}` {
+			t.Errorf("status = %v", got["status"])
+		}
+		if compact(got["filter"]["schema"]) != `{"type":"object","properties":{"id":{"type":"integer"}}}` {
+			t.Errorf("filter = %v", got["filter"])
+		}
+		for _, k := range []string{"enum", "annotations", "schema"} {
+			if _, ok := got["plain"][k]; ok {
+				t.Errorf("plain has %s", k)
+			}
+		}
+		return
+	}
+	t.Fatal("tasks command not found")
+}
