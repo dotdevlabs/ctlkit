@@ -94,7 +94,11 @@ func Save(product string, cfg *Config) error {
 
 // Resolve returns the active Context for the product.
 // Priority: ctxName arg > <PRODUCT>_CONTEXT env var > cfg.CurrentContext.
-// Applies <PRODUCT>_TOKEN env var override to the resolved Context.
+// Applies <PRODUCT>_TOKEN and <PRODUCT>_BASE_URL env var overrides to the
+// resolved Context. When no context name resolves but <PRODUCT>_BASE_URL is
+// set, a context built from the environment is returned (with an empty name),
+// so the CLI works without a context file. A named context that does not
+// exist is still an error.
 // Also returns the resolved context name.
 func Resolve(product string, cfg *Config, ctxName string) (*Context, string, error) {
 	prefix := strings.ToUpper(strings.ReplaceAll(product, "-", "_"))
@@ -106,6 +110,10 @@ func Resolve(product string, cfg *Config, ctxName string) (*Context, string, err
 	}
 	if ctxName == "" {
 		ctxName = cfg.CurrentContext
+	}
+	baseURL := os.Getenv(prefix + "_BASE_URL")
+	if ctxName == "" && baseURL != "" {
+		return &Context{BaseURL: baseURL, Token: os.Getenv(prefix + "_TOKEN")}, "", nil
 	}
 	if ctxName == "" {
 		return nil, "", clierror.New(
@@ -126,6 +134,9 @@ func Resolve(product string, cfg *Config, ctxName string) (*Context, string, err
 
 	if tok := os.Getenv(prefix + "_TOKEN"); tok != "" {
 		ctx.Token = tok
+	}
+	if baseURL != "" {
+		ctx.BaseURL = baseURL
 	}
 
 	return &ctx, ctxName, nil

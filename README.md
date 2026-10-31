@@ -72,6 +72,7 @@ Environment overrides (e.g., for `loopctl`):
 |----------|--------|
 | `LOOPCTL_CONTEXT` | Override active context name |
 | `LOOPCTL_TOKEN` | Override bearer token for active context |
+| `LOOPCTL_BASE_URL` | Override server address of the active context; works with no context file (set `LOOPCTL_TOKEN` too) |
 
 Multiple processes can target different environments simultaneously without mutating shared config.
 

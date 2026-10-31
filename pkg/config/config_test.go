@@ -184,3 +184,78 @@ func TestSaveRoundTrip(t *testing.T) {
 		t.Errorf("token = %q", loaded.Contexts["dev"].Token)
 	}
 }
+
+const prodCtxFile = `
+current_context: prod
+contexts:
+  prod:
+    base_url: https://prod.example.com
+    token: tok-prod
+`
+
+func TestResolveBaseURLUnsetKeepsFileURL(t *testing.T) {
+	writeTemp(t, "testctl", prodCtxFile)
+	t.Setenv("TESTCTL_BASE_URL", "")
+	cfg, _ := config.Load("testctl")
+	ctx, _, err := config.Resolve("testctl", cfg, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ctx.BaseURL != "https://prod.example.com" {
+		t.Errorf("BaseURL = %q, want file URL", ctx.BaseURL)
+	}
+}
+
+func TestResolveBaseURLEnvOverride(t *testing.T) {
+	writeTemp(t, "testctl", prodCtxFile)
+	t.Setenv("TESTCTL_BASE_URL", "https://env.example.com")
+	cfg, _ := config.Load("testctl")
+	ctx, name, err := config.Resolve("testctl", cfg, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ctx.BaseURL != "https://env.example.com" || ctx.Token != "tok-prod" || name != "prod" {
+		t.Errorf("got %+v name=%q", ctx, name)
+	}
+}
+
+func TestResolveBaseURLEnvNoContextFile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("TESTCTL_CONTEXT", "")
+	t.Setenv("TESTCTL_BASE_URL", "https://env.example.com")
+	t.Setenv("TESTCTL_TOKEN", "env-token")
+	cfg, err := config.Load("testctl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, name, err := config.Resolve("testctl", cfg, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ctx.BaseURL != "https://env.example.com" || ctx.Token != "env-token" || name != "" {
+		t.Errorf("got %+v name=%q", ctx, name)
+	}
+}
+
+func TestResolveBaseURLEnvNamedContextMissing(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("TESTCTL_BASE_URL", "https://env.example.com")
+	cfg, _ := config.Load("testctl")
+	if _, _, err := config.Resolve("testctl", cfg, "nope"); err == nil {
+		t.Fatal("expected not-found error for missing named context")
+	}
+}
+
+func TestResolveBaseURLEnvHyphenProduct(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MY_CTL_CONTEXT", "")
+	t.Setenv("MY_CTL_BASE_URL", "https://hyphen.example.com")
+	cfg, _ := config.Load("my-ctl")
+	ctx, _, err := config.Resolve("my-ctl", cfg, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ctx.BaseURL != "https://hyphen.example.com" {
+		t.Errorf("BaseURL = %q", ctx.BaseURL)
+	}
+}
