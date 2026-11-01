@@ -48,10 +48,11 @@ contexts:
 	}
 
 	r := root.New(root.BuildConfig{
-		Product:  "testctl",
-		Short:    "Test CLI",
-		Version:  version.Current("testctl"),
-		Commands: []*cobra.Command{probe},
+		Product:        "testctl",
+		DefaultBaseURL: "https://api.example.com",
+		Short:          "Test CLI",
+		Version:        version.Current("testctl"),
+		Commands:       []*cobra.Command{probe},
 	})
 	r.SetOut(&bytes.Buffer{})
 	r.SetErr(&bytes.Buffer{})
@@ -108,10 +109,11 @@ contexts:
 	}
 
 	r := root.New(root.BuildConfig{
-		Product:  "testctl",
-		Short:    "Test CLI",
-		Version:  version.Current("testctl"),
-		Commands: []*cobra.Command{probe},
+		Product:        "testctl",
+		DefaultBaseURL: "https://api.example.com",
+		Short:          "Test CLI",
+		Version:        version.Current("testctl"),
+		Commands:       []*cobra.Command{probe},
 	})
 	r.SetOut(&bytes.Buffer{})
 	r.SetErr(&bytes.Buffer{})
@@ -153,10 +155,11 @@ contexts:
 	}
 
 	r := root.New(root.BuildConfig{
-		Product:  "testctl",
-		Short:    "Test CLI",
-		Version:  version.Current("testctl"),
-		Commands: []*cobra.Command{probe},
+		Product:        "testctl",
+		DefaultBaseURL: "https://api.example.com",
+		Short:          "Test CLI",
+		Version:        version.Current("testctl"),
+		Commands:       []*cobra.Command{probe},
 	})
 	r.SetOut(&bytes.Buffer{})
 	r.SetErr(&bytes.Buffer{})
@@ -178,9 +181,10 @@ func TestAuthCommandSkipsPreRun(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	r := root.New(root.BuildConfig{
-		Product: "testctl",
-		Short:   "Test CLI",
-		Version: version.Current("testctl"),
+		Product:        "testctl",
+		DefaultBaseURL: "https://api.example.com",
+		Short:          "Test CLI",
+		Version:        version.Current("testctl"),
 	})
 	r.SetOut(&bytes.Buffer{})
 	r.SetErr(&bytes.Buffer{})

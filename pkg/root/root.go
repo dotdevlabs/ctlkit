@@ -2,7 +2,10 @@
 package root
 
 import (
+	"fmt"
+	"net/url"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -16,17 +19,47 @@ import (
 
 // BuildConfig configures the root command builder.
 type BuildConfig struct {
-	Product   string
-	Short     string
-	Version   version.Info
-	Commands  []*cobra.Command
-	Workflows []airef.Workflow
+	Product string
+	// DefaultBaseURL is the product's built-in server address. Required:
+	// an absolute https:// URL. Build/New refuse to build without it.
+	DefaultBaseURL string
+	Short          string
+	Version        version.Info
+	Commands       []*cobra.Command
+	Workflows      []airef.Workflow
 }
 
-// New builds and returns the root cobra.Command for the product.
-// Always includes: auth, context, version, ai subcommands.
+// New builds the root command like Build, but panics if the config is
+// invalid so a CLI without a valid DefaultBaseURL cannot start.
 func New(cfg BuildConfig) *cobra.Command {
+	cmd, err := Build(cfg)
+	if err != nil {
+		panic(err)
+	}
+	return cmd
+}
+
+// validateDefaultBaseURL checks that the product has an absolute https URL.
+func validateDefaultBaseURL(product, raw string) error {
+	if raw == "" {
+		return fmt.Errorf("%s: DefaultBaseURL is required (set BuildConfig.DefaultBaseURL to the product's https:// server address)", product)
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.Host == "" || strings.ContainsAny(raw, " \t\r\n") {
+		return fmt.Errorf("%s: DefaultBaseURL %q is invalid: must be an absolute https:// URL with a host", product, raw)
+	}
+	return nil
+}
+
+// Build builds and returns the root cobra.Command for the product.
+// Always includes: auth, context, version, ai subcommands.
+// Returns an error naming the product if DefaultBaseURL is empty or invalid.
+func Build(cfg BuildConfig) (*cobra.Command, error) {
+	if err := validateDefaultBaseURL(cfg.Product, cfg.DefaultBaseURL); err != nil {
+		return nil, err
+	}
 	var (
+		flagToken   string
 		flagContext string
 		flagJSON    bool
 		flagFormat  string
@@ -56,7 +89,11 @@ func New(cfg BuildConfig) *cobra.Command {
 				return err
 			}
 
-			activeCtx, _, err := config.Resolve(cfg.Product, productCfg, flagContext)
+			activeCtx, _, err := config.Resolve(cfg.Product, productCfg, config.ResolveOptions{
+				Context:        flagContext,
+				Token:          flagToken,
+				DefaultBaseURL: cfg.DefaultBaseURL,
+			})
 			if err != nil {
 				return err
 			}
@@ -77,6 +114,7 @@ func New(cfg BuildConfig) *cobra.Command {
 
 	// Global persistent flags.
 	root.PersistentFlags().StringVar(&flagContext, "context", "", "Named context to use")
+	root.PersistentFlags().StringVar(&flagToken, "token", "", "API token (overrides <PRODUCT>_TOKEN and the context token)")
 	root.PersistentFlags().BoolVar(&flagJSON, "json", false, "Output as JSON envelope")
 	root.PersistentFlags().StringVar(&flagFormat, "format", "", "Go-template for output")
 	root.PersistentFlags().BoolVar(&flagDryRun, "dry-run", false, "Preview without API writes")
@@ -93,5 +131,5 @@ func New(cfg BuildConfig) *cobra.Command {
 		root.AddCommand(cmd)
 	}
 
-	return root
+	return root, nil
 }

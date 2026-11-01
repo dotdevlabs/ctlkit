@@ -92,51 +92,68 @@ func Save(product string, cfg *Config) error {
 	return nil
 }
 
-// Resolve returns the active Context for the product.
-// Priority: ctxName arg > <PRODUCT>_CONTEXT env var > cfg.CurrentContext.
-// Applies <PRODUCT>_TOKEN and <PRODUCT>_BASE_URL env var overrides to the
-// resolved Context. When no context name resolves but <PRODUCT>_BASE_URL is
-// set, a context built from the environment is returned (with an empty name),
-// so the CLI works without a context file. A named context that does not
-// exist is still an error.
-// Also returns the resolved context name.
-func Resolve(product string, cfg *Config, ctxName string) (*Context, string, error) {
+// ResolveOptions carries the per-invocation inputs to Resolve.
+type ResolveOptions struct {
+	// Context is the explicit context name (the --context flag).
+	Context string
+	// Token is the explicit token (the --token flag).
+	Token string
+	// DefaultBaseURL is the product's built-in server address.
+	DefaultBaseURL string
+}
+
+// Resolve returns the active Context for the product, plus its name.
+//
+// Context selection: opts.Context > <PRODUCT>_CONTEXT > cfg.CurrentContext.
+// A selected context must exist (otherwise a not-found error). Its BaseURL
+// wins; if it has none, <PRODUCT>_BASE_URL and then opts.DefaultBaseURL apply.
+// With no context selected, the base URL is <PRODUCT>_BASE_URL (an override)
+// or else opts.DefaultBaseURL, and the returned name is empty.
+//
+// Token: opts.Token > <PRODUCT>_TOKEN > the context's token.
+func Resolve(product string, cfg *Config, opts ResolveOptions) (*Context, string, error) {
 	prefix := strings.ToUpper(strings.ReplaceAll(product, "-", "_"))
 
+	ctxName := opts.Context
 	if ctxName == "" {
-		if envCtx := os.Getenv(prefix + "_CONTEXT"); envCtx != "" {
-			ctxName = envCtx
-		}
+		ctxName = os.Getenv(prefix + "_CONTEXT")
 	}
 	if ctxName == "" {
 		ctxName = cfg.CurrentContext
 	}
-	baseURL := os.Getenv(prefix + "_BASE_URL")
-	if ctxName == "" && baseURL != "" {
-		return &Context{BaseURL: baseURL, Token: os.Getenv(prefix + "_TOKEN")}, "", nil
-	}
-	if ctxName == "" {
-		return nil, "", clierror.New(
-			clierror.CodeUsage,
-			"no context selected",
-			"use 'auth login --name <ctx>' to create one",
-		)
+
+	var ctx Context
+	if ctxName != "" {
+		c, ok := cfg.Contexts[ctxName]
+		if !ok {
+			return nil, "", clierror.New(
+				clierror.CodeNotFound,
+				fmt.Sprintf("context %q not found", ctxName),
+				"run 'context list' to see available contexts",
+			)
+		}
+		ctx = c
 	}
 
-	ctx, ok := cfg.Contexts[ctxName]
-	if !ok {
+	if ctx.BaseURL == "" {
+		ctx.BaseURL = os.Getenv(prefix + "_BASE_URL")
+	}
+	if ctx.BaseURL == "" {
+		ctx.BaseURL = opts.DefaultBaseURL
+	}
+	if ctx.BaseURL == "" {
 		return nil, "", clierror.New(
-			clierror.CodeNotFound,
-			fmt.Sprintf("context %q not found", ctxName),
-			"run 'context list' to see available contexts",
+			clierror.CodeUsage,
+			fmt.Sprintf("%s: no server address configured", product),
+			"set "+prefix+"_BASE_URL or build the CLI with a DefaultBaseURL",
 		)
 	}
 
 	if tok := os.Getenv(prefix + "_TOKEN"); tok != "" {
 		ctx.Token = tok
 	}
-	if baseURL != "" {
-		ctx.BaseURL = baseURL
+	if opts.Token != "" {
+		ctx.Token = opts.Token
 	}
 
 	return &ctx, ctxName, nil
