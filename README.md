@@ -33,6 +33,7 @@ import (
 func main() {
     cmd := root.New(root.BuildConfig{
         Product:  "loopctl",
+        DefaultBaseURL: "https://loop.example.com", // required: https:// server address
         Short:    "Manage Loop resources",
         Version:  version.Current("loopctl"),
         Commands: nil, // register your resource-verb commands here
@@ -43,9 +44,25 @@ func main() {
 }
 ```
 
+`DefaultBaseURL` is required: an absolute `https://` URL. `root.New` panics (and
+`root.Build` returns an error naming the product) when it is empty or invalid, so
+a CLI without one cannot start. Call `roottest.AssertBuilds` from every CLI's tests:
+
+```go
+func TestRootBuilds(t *testing.T) {
+    roottest.AssertBuilds(t, root.BuildConfig{Product: "loopctl", DefaultBaseURL: "https://loop.example.com" /* ... */})
+}
+```
+
+Server address resolution order: `--context` / `<PRODUCT>_CONTEXT`, then the
+current context file, then `<PRODUCT>_BASE_URL` (an override only), then
+`DefaultBaseURL`. A user only needs a token: the context's token,
+`<PRODUCT>_TOKEN`, or the `--token` flag (flag > env > context). A named
+context that does not exist is the only "not found" error.
+
 Downstream CLIs get for free:
 
-- `--context`, `--json`, `--format`, `--dry-run`, `--verbose` global flags
+- `--context`, `--token`, `--json`, `--format`, `--dry-run`, `--verbose` global flags
 - `auth login --name <ctx> --url <url> --token <token>` to register a named context
 - `context list` / `context select <name>` to manage active context
 - `version` command with optional `--json` output

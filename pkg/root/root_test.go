@@ -15,10 +15,11 @@ import (
 
 func makeRoot(extraCmds ...*cobra.Command) *cobra.Command {
 	return root.New(root.BuildConfig{
-		Product:  "testctl",
-		Short:    "Test CLI",
-		Version:  version.Current("testctl"),
-		Commands: extraCmds,
+		Product:        "testctl",
+		DefaultBaseURL: "https://api.example.com",
+		Short:          "Test CLI",
+		Version:        version.Current("testctl"),
+		Commands:       extraCmds,
 	})
 }
 
