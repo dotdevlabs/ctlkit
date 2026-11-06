@@ -20,6 +20,10 @@ import (
 // BuildConfig configures the root command builder.
 type BuildConfig struct {
 	Product string
+	// ContractVersion is the API contract this CLI was built against; empty disables the advisory.
+	ContractVersion string
+	// UpgradeInstructions tells users how to upgrade when contracts differ.
+	UpgradeInstructions string
 	// DefaultBaseURL is the product's built-in server address. Required:
 	// an absolute https:// URL. Build/New refuse to build without it.
 	DefaultBaseURL string
@@ -57,6 +61,9 @@ func validateDefaultBaseURL(product, raw string) error {
 func Build(cfg BuildConfig) (*cobra.Command, error) {
 	if err := validateDefaultBaseURL(cfg.Product, cfg.DefaultBaseURL); err != nil {
 		return nil, err
+	}
+	if cfg.ContractVersion != "" && strings.TrimSpace(cfg.UpgradeInstructions) == "" {
+		return nil, fmt.Errorf("%s: UpgradeInstructions is required with ContractVersion", cfg.Product)
 	}
 	var (
 		flagToken   string
@@ -108,6 +115,7 @@ func Build(cfg BuildConfig) (*cobra.Command, error) {
 			ctx = ctxutil.WithClient(ctx, client)
 			ctx = ctxutil.WithRenderer(ctx, renderer)
 			cmd.SetContext(ctx)
+			checkContract(cmd, cfg, activeCtx.BaseURL, activeCtx.Token)
 			return nil
 		},
 	}

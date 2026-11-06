@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -81,8 +80,6 @@ func CheckUpdate(ctx context.Context, currentVersion, latestURL string) (string,
 		return "", false, err
 	}
 
-	latest := strings.TrimPrefix(payload.TagName, "v")
-	current := strings.TrimPrefix(currentVersion, "v")
-	isNewer := latest != "" && latest != current && latest > current
+	isNewer := newerSemver(payload.TagName, currentVersion)
 	return payload.TagName, isNewer, nil
 }
