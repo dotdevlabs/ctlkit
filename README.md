@@ -34,6 +34,8 @@ func main() {
     cmd := root.New(root.BuildConfig{
         Product:  "loopctl",
         DefaultBaseURL: "https://loop.example.com", // required: https:// server address
+        ContractVersion: "1.0.0",
+        UpgradeInstructions: "brew upgrade loopctl",
         Short:    "Manage Loop resources",
         Version:  version.Current("loopctl"),
         Commands: nil, // register your resource-verb commands here
@@ -43,6 +45,20 @@ func main() {
     }
 }
 ```
+
+`ContractVersion` and `UpgradeInstructions` are product build data. When a contract
+version is supplied, upgrade instructions are required. Before server commands,
+the shared root setup makes one GET to `/status`, with a 500ms timeout and no
+retries or redirects. If `data.attributes.contract_version` differs, one warning
+on stderr names both versions and the upgrade instructions. JSON stdout and the
+command result are unaffected. Unavailable, erroneous, or missing status versions
+are silent. Empty `ContractVersion` disables the check for existing consumers.
+Local auth, context, version, ai, help and completion commands skip the check.
+Product commands overriding Cobra's `PersistentPreRunE` must chain the root's
+hook to retain shared setup and the advisory.
+
+`CheckUpdate` uses semantic version precedence, including prereleases and ignored
+build metadata. Invalid or development versions are conservatively not newer.
 
 `DefaultBaseURL` is required: an absolute `https://` URL. `root.New` panics (and
 `root.Build` returns an error naming the product) when it is empty or invalid, so
